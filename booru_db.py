@@ -79,15 +79,15 @@ class TagDatabase:
             if not isinstance(value, list): raise TypeError
             with db.atomic():
                 subquery_tag_ids = PostTag.select(PostTag.tag_id).where(PostTag.post == item)
-                TagPostCount.update(post_count = TagPostCount.post_count - 1, changed_at=fn.Now()).where(TagPostCount.board == item.board).where(TagPostCount.tag.in_(subquery_tag_ids)).execute()
+                #TagPostCount.update(post_count = TagPostCount.post_count - 1, changed_at=fn.Now()).where(TagPostCount.board == item.board).where(TagPostCount.tag.in_(subquery_tag_ids)).execute()
 
-                PostTag.delete().where(PostTag.post == item)
+                PostTag.delete().where(PostTag.post == item).execute()
 
                 for tagname in value:
-                    PostTag.create(post=item, tag=TagDatabase.get_tag(tagname))
+                    PostTag.get_or_create(post=item, tag=TagDatabase.get_tag(tagname))
                     TagPostCount.get_or_create(board=item.board, tag=TagDatabase.get_tag(tagname))
 
-                TagPostCount.update(post_count = TagPostCount.post_count + 1, changed_at=fn.Now()).where(TagPostCount.board == item.board).where(TagPostCount.tag.in_(subquery_tag_ids)).execute()
+                #TagPostCount.update(post_count = TagPostCount.post_count + 1, changed_at=fn.Now()).where(TagPostCount.board == item.board).where(TagPostCount.tag.in_(subquery_tag_ids)).execute()
         else:
             raise TypeError
 

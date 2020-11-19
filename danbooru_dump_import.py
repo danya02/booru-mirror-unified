@@ -3,10 +3,13 @@ from database import *
 import datetime
 import json
 import traceback
+import random
+import time
+import logging
 
 bdb = BooruDatabase('danbooru')
 
-os.chdir('/hugedata/booru/danbooru2019/danbooru2019/metadata')
+os.chdir('/hugedata/booru/danbooru2019/danbooru2019/metadata/small')
 
 def parse_date(val):
     try:
@@ -21,8 +24,9 @@ def parse_date(val):
     return v
 
 def insert_row(struct, skip_if_exists=True):
+    print(struct['id'])
     post = Post()
-    post_existing = Post.get_or_none(Post.board == bdb.booru, Post.local_id == int(struct['id']))
+    post_existing = bdb.post[ int(struct['id']) ]
     if skip_if_exists and (post_existing is not None):
         return None
 
@@ -73,26 +77,45 @@ def insert_row_atomic(*args, **kwargs):
 
 #insert_row_atomic(json.loads(input()))
 
-files = []
-for i in os.popen('find -type f'):
-    files.append(i.strip())
+files = os.popen('find -type f')
 
-files.sort()
+class CountHandler(logging.Handler):
+    def __init__(self):
+        self.count = 0
+        super().__init__()
 
-current = {'file':None, 'offset': None, 'line': None}
+    def emit(self, record):
+        self.count += 1
+
+    def handle(self, record):
+        self.count += 1
+
+    def reset(self):
+        self.count = 0
+
+counter = CountHandler()
+logger = logging.getLogger('peewee')
+logger.addHandler(counter)
+logger.setLevel(logging.DEBUG)
 
 try:
     for file in files:
+        print('recv file', file)
+        if 'orig/' in file:
+            print('original: ', orig)
+            continue
+        file = file.strip()
+        if random.random()>=1:
+            print('skip', file)
+            continue
         with open(file) as handle:
-            current['offset'] = 0
-            current['line'] = 1
-            for line in handle:
+            for num, line in enumerate(handle):
+                print(file, num)
+                when = time.time()
                 insert_row_atomic(json.loads(line))
-                current['file'] = file
-                current['offset'] += len(line)
-                current['line'] += 1
-                print(current)
+                print('took', time.time()-when, 'seconds and', counter.count, 'queries')
+                counter.reset()
+        os.unlink(file)
 except:
     traceback.print_exc()
-    print('ptr', current)
-
+    print('err at', file)

@@ -7,7 +7,7 @@ import os
 
 IMAGE_DIR = '/hugedata/booru'
 
-#db = SqliteDatabase(SITE+'.db', timeout=600)
+#db = SqliteDatabase('test.db', timeout=600)
 db = MySQLDatabase('unifiedbooru', user='booru', password='booru', host='10.0.0.2')
 
 class MediumBlobField(BlobField):
@@ -70,8 +70,8 @@ class File(Model):
 
 import logging
 logger = logging.getLogger('peewee')
-logger.addHandler(logging.StreamHandler())
-#logger.setLevel(logging.DEBUG)
+#logger.addHandler(logging.StreamHandler())
+logger.setLevel(logging.DEBUG)
 
 class MyModel(Model):
     class Meta:
@@ -154,12 +154,13 @@ class Post(MyModel):
 
 @create_table
 class PostFavs(MyModel):
-    post = ForeignKeyField(Post)
     user = ForeignKeyField(User)
+    post = ForeignKeyField(Post)
     class Meta:
         indexes = (
                 (('post', 'user'), True),
         )
+        primary_key = CompositeKey('user', 'post')
 
 @create_table
 class ImageMetadata(MyModel):
