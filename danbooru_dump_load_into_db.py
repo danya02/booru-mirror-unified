@@ -38,7 +38,14 @@ try:
             print('inserting took', time.time()-when, 'seconds')
             os.unlink(file)
         except IntegrityError:
-            print('error while inserting, skipping deletion')
+            with db.atomic():
+                for i in to_insert:
+                    try:
+                        DanbooruDumpRow.insert_many([i]).execute()
+                    except IntegrityError:
+                        pass
+            print('inserting took', time.time()-when, 'seconds')
+            os.unlink(file)
 except:
     traceback.print_exc()
     print('err at', file)

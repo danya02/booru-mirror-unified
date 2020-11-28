@@ -77,8 +77,6 @@ def insert_row_atomic(*args, **kwargs):
 
 #insert_row_atomic(json.loads(input()))
 
-files = os.popen('find -type f')
-
 class CountHandler(logging.Handler):
     def __init__(self):
         self.count = 0
@@ -98,24 +96,26 @@ logger = logging.getLogger('peewee')
 logger.addHandler(counter)
 logger.setLevel(logging.DEBUG)
 
-try:
-    for file in files:
-        print('recv file', file)
-        if 'orig/' in file:
-            print('original: ', orig)
-            continue
-        file = file.strip()
-        if random.random()>=1:
-            print('skip', file)
-            continue
-        with open(file) as handle:
-            for num, line in enumerate(handle):
-                print(file, num)
-                when = time.time()
-                insert_row_atomic(json.loads(line))
-                print('took', time.time()-when, 'seconds and', counter.count, 'queries')
-                counter.reset()
-        os.unlink(file)
-except:
-    traceback.print_exc()
-    print('err at', file)
+class DanbooruDumpRow(MyModel):
+    post_id = IntegerField()
+    content = TextField()
+
+when = time.time()
+#for row in DanbooruDumpRow.select().order_by(fn.Rand()):
+while 1:
+#    count = DanbooruDumpRow.select(fn.COUNT(DanbooruDumpRow.id)).scalar()
+#    if not count:
+#        print('All done!!!')
+#        break
+#    row = DanbooruDumpRow.select().where(DanbooruDumpRow.id >= random.randint(0, count)).get()
+    row = DanbooruDumpRow.select().get()
+    print('selecting row', row.id, 'post_id', row.post_id, 'took', time.time()-when, 'seconds and', counter.count, 'queries')
+    when = time.time()
+    insert_row_atomic(json.loads(row.content))
+    print('inserting took', time.time()-when, 'seconds and', counter.count, 'queries')
+    when = time.time()
+    row.delete_instance()
+    print('removing took', time.time()-when, 'seconds and', counter.count, 'queries')
+    print()
+    counter.reset()
+    when = time.time()
