@@ -5,8 +5,9 @@ import hashlib
 import io
 import os
 import random
+import hashlib
 
-IMAGE_DIR = '/hugedata/booru'
+IMAGE_DIR = '/hugedata/booru/unified'
 
 #db = SqliteDatabase('test.db', timeout=600)
 db = MySQLDatabase('unifiedbooru', user='booru', password='booru', host='10.0.0.2')
@@ -16,32 +17,38 @@ class MediumBlobField(BlobField):
 
 content_databases = dict()
 
-def get_content_db(board_name, name):
-    database = content_databases.get( (board_name, name[:2]) )
+def sha256_hash(data):
+    hasher = hashlib.sha256()
+    hasher.update(data)
+    return hasher.hexdigest()
+
+def get_content_db(name):
+    database = content_databases.get( name[:2] )
     if database is None:
         try:
-            os.makedirs(IMAGE_DIR+'/'+board_name)
+            os.makedirs(IMAGE_DIR)
         except FileExistsError:
             pass
-    database = SqliteDatabase(IMAGE_DIR+'/'+booru_name+'/'+name[:2]+'.db', timeout=300)
-    content_databases[ (booru_name, name[:2]) ] = database
+        database = SqliteDatabase(IMAGE_DIR+'/'+name[:2]+'.db', timeout=300)
+    content_databases[ name[:2] ] = database
     return database
 
 class File(Model):
-    name = CharField(unique=True, primary_key=True)
-    content = BlobField()
+    sha256 = CharField(unique=True, primary_key=True)
     mimetype = CharField()
+    content = BlobField()
 
     @staticmethod
-    def get_file_content(booru, name):
-        database = get_content_db(booru, name)
+    def get_file_by_sha256(name):
+        database = get_content_db(name)
         with database.bind_ctx((File,)):
             database.create_tables((File,))
             file = File.get(File.name==name).content
         return file
 
     @staticmethod
-    def set_file_content(booru, name, data):
+    def save_file(data):
+        name = sha256_hash(data)
         database = get_content_db(booru, name)
         with database.bind_ctx((File,)):
             database.create_tables((File,))
@@ -52,11 +59,11 @@ class File(Model):
                 filerow = File.create(name=name, content=data)
 
     @staticmethod
-    def delete_file(booru, name):
-        database = get_content_db(booru, name)
+    def delete_file_by_sha256(name):
+        database = get_content_db(name)
         with database.bind_ctx((File,)):
             database.create_tables((File,))
-            return File.delete().where(File.name==name).execute()
+            return File.delete().where(File.sha256==name).execute()
 
 
     @staticmethod
