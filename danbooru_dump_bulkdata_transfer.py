@@ -5,20 +5,25 @@ import os
 import queue
 import time
 import magic
-import buffer
-import lockedfiles
+import redis
+
+r = redis.Redis()
 
 BOARD, _ = Imageboard.get_or_create(name='danbooru', base_url='https://danbooru.me')
 
 started_work_at = time.time()
 jobs_executed = 0
 time_running = 0
+find_files = False
 
-def data_import(path, thread=None):
+#@create_table
+class FileToImportTMP(MyModel):
+    path = CharField(unique=True)
+    locked = BooleanField(default=False)
+
+def data_import(path, thread=None, select_row_time=None):
     started_at = time.time()
     id = int( path.split('/')[-1].split('.')[0] )
-    if not lockedfiles.take(id):
-        return
     mimetype = magic.from_file(path, mime=True)
     mimetype_row, _ = MimeType.get_or_create(name=mimetype)
     handle = open(path, 'rb')
@@ -38,7 +43,6 @@ def data_import(path, thread=None):
     db_operations_done_at = time.time()
 
     os.unlink(path)
-    lockedfiles.release(id)
     unlinked_at = time.time()
 
     n = 6
@@ -49,19 +53,42 @@ def data_import(path, thread=None):
 
     global jobs_executed
     global time_running
-    time_running += (read_time + wrote_time + db_ops_time + unlink_time)
+    time_running += (read_time + wrote_time + db_ops_time + unlink_time) + select_row_time
     jobs_executed += 1
     #running_time = unlinked_at - started_work_at
     time_per_job = time_running / jobs_executed
+    
+    time_on_job = round(read_time+wrote_time+db_ops_time+unlink_time+select_row_time, n)
 
-    print(str(thread)+'#' if thread is not None else '', 'img_id:', str(id).ljust(7), '\tread:', str(read_time).ljust(n+2, '0'), '\twrote:', str(wrote_time).ljust(n+2, '0'), '\tdb_ops:', str(db_ops_time).ljust(n+2, '0'), '\tunlink:', str(unlink_time).ljust(n+2, '0'), '\tsaved at id:', content_row, '\t', 'avg_time_per_job:', round(time_per_job, n), 'jobs:', jobs_executed)
+    print(str(thread)+'#' if thread is not None else '', '' if select_row_time is None else f'select: {round(select_row_time, 6)}\t',  'img_id:', str(id).ljust(7), '\tread:', str(read_time).ljust(n+2, '0'), '\twrote:', str(wrote_time).ljust(n+2, '0'), '\tdb_ops:', str(db_ops_time).ljust(n+2, '0'), '\ttotal:', str(time_on_job).ljust(n+2,'0'), '\tsaved at id:', content_row, '\t', 'avg_time_per_job:', round(time_per_job, n), 'jobs:', jobs_executed)
 
 path = '/hugedata/booru/danbooru2019/danbooru2019/original'
-handle = os.popen('find "'+path+'" -type f')
+if __name__ == '__main__':
+    if find_files:
+        handle = os.popen('find "'+path+'" -type f')
+        n = 0
+        with db.atomic() as txn:
+            for path in handle:
+                n += 1
+                path = path.strip()
+                started = time.time()
+                print(FileToImportTMP.get_or_create(path=path), time.time()-started)
+                if n%100 == 0:
+                    txn.commit()
 
-for path in handle:
-    path = path.strip()
-    try:
-        data_import(path)
-    except:
-        traceback.print_exc()
+    else:
+        while True:
+            started_at = time.time()
+            path, locked = '', 1
+            while locked:
+                path = r.randomkey()
+                l = r.get(path)
+                locked = l==b'1'
+                path = str(path, 'utf8')
+            r.set(path, '1')
+            try:
+                data_import(path, select_row_time=time.time()-started_at)
+                r.delete(path) 
+            except:
+                traceback.print_exc()
+                continue

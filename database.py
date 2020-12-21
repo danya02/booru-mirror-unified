@@ -39,24 +39,32 @@ class File(Model):
     content = BlobField()
 
     @staticmethod
-    def get_file_by_sha256(name):
+    def get_file_by_sha256(name, return_instance=False):
         database = get_content_db(name)
         with database.bind_ctx((File,)):
             database.create_tables((File,))
-            file = File.get(File.name==name).content
-        return file
+            file = File.get(File.sha256==name)
+        if not return_instance:
+            return file.content
+        else:
+            return file
 
     @staticmethod
-    def save_file(data):
+    def save_file(data, mimetype):
         name = sha256_hash(data)
-        database = get_content_db(booru, name)
+        database = get_content_db(name)
         with database.bind_ctx((File,)):
             database.create_tables((File,))
             try:
-                filerow = File.get(File.name == name)
+                filerow = File.get(File.sha256 == name)
                 filerow.content = data
+                filerow.mimetype = mimetype
+                filerow.save()
+                print('!!! file by hash', name, 'and mimetype', mimetype, 'already exists, resaving')
+                return name
             except File.DoesNotExist:
-                filerow = File.create(name=name, content=data)
+                filerow = File.create(sha256=name, mimetype=mimetype, content=data)
+                return name
 
     @staticmethod
     def delete_file_by_sha256(name):
@@ -72,7 +80,7 @@ class File(Model):
         with database.bind_ctx((File,)):
             database.create_tables((File,))
             try:
-                return File.select(fn.length(File.content)).where(File.name == name).scalar()
+                return File.select(fn.length(File.content)).where(File.sha256 == name).scalar()
             except File.DoesNotExist:
                 return None
 
@@ -241,10 +249,11 @@ class MimeType(MyModel):
 @create_table
 class Content(MyModel):
     post = ForeignKeyField(Post, backref='content')
-    path = CharField(index=True)
+    sha256_current = CharField(unique=True)
+    sha256_when_acquired = CharField(unique=True, null=True)
     mimetype = ForeignKeyField(MimeType, backref='contents')
-    file_size_when_acquired = IntegerField(index=True)
     file_size_current = IntegerField(index=True)
+    file_size_when_acquired = IntegerField(index=True, null=True)
     we_modified_it = BooleanField(index=True)
 
 @create_table
