@@ -1,3 +1,5 @@
+import sys
+sys.path.append('..')
 from booru_db import BooruDatabase
 from database import *
 import datetime

@@ -1,3 +1,5 @@
+import sys
+sys.path.append('..')
 from database import *
 from danbooru_dump_bulkdata_transfer import FileToImportTMP  
 import sys

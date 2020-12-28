@@ -50,17 +50,18 @@ class File(Model):
             return file
 
     @staticmethod
-    def save_file(data, mimetype):
+    def save_file(data, mimetype, warn_if_exists=True):
         name = sha256_hash(data)
         database = get_content_db(name)
         with database.bind_ctx((File,)):
             database.create_tables((File,))
             try:
                 filerow = File.get(File.sha256 == name)
-                filerow.content = data
-                filerow.mimetype = mimetype
-                filerow.save()
-                print('!!! file by hash', name, 'and mimetype', mimetype, 'already exists, resaving')
+                #filerow.content = data
+                #filerow.mimetype = mimetype
+                #filerow.save()
+                if warn_if_exists:
+                    print('!!! file by hash', name, 'and mimetype', mimetype, 'already exists, skipping')
                 return name
             except File.DoesNotExist:
                 filerow = File.create(sha256=name, mimetype=mimetype, content=data)
@@ -254,7 +255,7 @@ class Content(MyModel):
     mimetype = ForeignKeyField(MimeType, backref='contents')
     file_size_current = IntegerField(index=True)
     file_size_when_acquired = IntegerField(index=True, null=True)
-    we_modified_it = BooleanField(index=True)
+    we_modified_it = BooleanField(index=True, default=False)
 
 @create_table
 class Comment(MyModel):
