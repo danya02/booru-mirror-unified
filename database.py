@@ -7,8 +7,9 @@ import os
 import random
 import hashlib
 
-IMAGE_DIR = '/hugedata/booru/unified'
-
+IMAGE_DIR = '/hugedata/booru/'
+DIR_TREE_DEPTH = 2
+DIR_TREE_SEGMENT_LEN = 2
 #db = SqliteDatabase('test.db', timeout=600)
 db = MySQLDatabase('unifiedbooru', user='booru', password='booru', host='10.0.0.2')
 
@@ -22,68 +23,39 @@ def sha256_hash(data):
     hasher.update(data)
     return hasher.hexdigest()
 
-def get_content_db(name):
-    database = content_databases.get( name[:2] )
-    if database is None:
-        try:
-            os.makedirs(IMAGE_DIR)
-        except FileExistsError:
-            pass
-        database = SqliteDatabase(IMAGE_DIR+'/'+name[:2]+'.db', timeout=300)
-    content_databases[ name[:2] ] = database
-    return database
+def get_dir(name):
+    path = ''
+    cursor = DIR_TREE_SEGMENT_LEN
+    for ind in range(DIR_TREE_DEPTH):
+        path += name[:cursor] + '/'
+        cursor += DIR_TREE_SEGMENT_LEN
+    return path
 
-class File(Model):
-    sha256 = CharField(unique=True, primary_key=True)
-    mimetype = CharField()
-    content = BlobField()
+def get_path(name):
+    return get_dir(name) + name
 
-    @staticmethod
-    def get_file_by_sha256(name, return_instance=False):
-        database = get_content_db(name)
-        with database.bind_ctx((File,)):
-            database.create_tables((File,))
-            file = File.get(File.sha256==name)
-        if not return_instance:
-            return file.content
-        else:
-            return file
+def ensure_dir(name):
+    target_dir = get_dir(name)
+    os.makedirs(IMAGE_DIR + target_dir, exist_ok=True)
 
-    @staticmethod
-    def save_file(data, mimetype, warn_if_exists=True):
+class File:
+    def save_file(data, raise_if_exists=True, but_check_for_same=False):
         name = sha256_hash(data)
-        database = get_content_db(name)
-        with database.bind_ctx((File,)):
-            database.create_tables((File,))
-            try:
-                filerow = File.get(File.sha256 == name)
-                #filerow.content = data
-                #filerow.mimetype = mimetype
-                #filerow.save()
-                if warn_if_exists:
-                    print('!!! file by hash', name, 'and mimetype', mimetype, 'already exists, skipping')
-                return name
-            except File.DoesNotExist:
-                filerow = File.create(sha256=name, mimetype=mimetype, content=data)
-                return name
-
-    @staticmethod
-    def delete_file_by_sha256(name):
-        database = get_content_db(name)
-        with database.bind_ctx((File,)):
-            database.create_tables((File,))
-            return File.delete().where(File.sha256==name).execute()
-
-
-    @staticmethod
-    def get_length(name):
-        database = get_content_db(name)
-        with database.bind_ctx((File,)):
-            database.create_tables((File,))
-            try:
-                return File.select(fn.length(File.content)).where(File.sha256 == name).scalar()
-            except File.DoesNotExist:
-                return None
+        ensure_dir(name)
+        path = IMAGE_DIR + get_path(name)
+        if os.path.isfile(path) and raise_if_exists:
+            if not but_check_for_same:
+                raise FileExistsError('file with name', path, 'already exists')
+            else:
+                with open(path, 'rb') as handle:
+                    exist_data = handle.read()
+                if data == exist_data:
+                    return name
+                else:
+                    raise FileExistsError('file with name', path, 'already exists and is different from new data')
+        with open(path, 'wb') as handle:
+            handle.write(data)
+        return name
 
 import logging
 logger = logging.getLogger('peewee')

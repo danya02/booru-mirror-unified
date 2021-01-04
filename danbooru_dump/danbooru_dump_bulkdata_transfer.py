@@ -3,6 +3,7 @@ sys.path.append('..')
 from database import *
 import traceback
 import os
+import shutil
 #import threading
 import queue
 import time
@@ -13,6 +14,7 @@ import concurrent.futures
 
 r = redis.Redis()
 rc = redis.Redis(db=2)
+#rhashes_mimes = redis.Redis(db=2)
 
 BOARD, _ = Imageboard.get_or_create(name='danbooru', base_url='https://danbooru.me')
 
@@ -43,51 +45,74 @@ def data_import(path, thread=None, select_row_time=None):
     started_at = time.time()
     n=6
 
-    @time_it
-    def read_data(path=path):
-        id = int( path.split('/')[-1].split('.')[0] )
-        data = rc.get(path)
-        if data is None:
-            handle = open(path, 'rb')
-            data = handle.read()
-            handle.close()
-        if data == b'':
-            print('!!!! file at', path, 'is empty!!')
-            return None, None
-        return id, data
-    
-    read_time, a = read_data()
-    id, data = a
-    if id is None: return
 
-    @time_it
-    def get_mimetype_from_file(data=data):
-        mimetype = magic.from_buffer(data, mime=True)
-        return mimetype
+    read_start = time.time()
+    id = int( path.split('/')[-1].split('.')[0] )
+    res = rc.get(path)
+    if res is not None:
+        res = str(res, 'utf-8')
+        sha256, mt_str = res.split(' ', 1)
+        read_time = time.time() - read_start
+        compute_time = 0
+    else:
+        @time_it
+        def read_data(path=path):
+            data = rc.get(path)
+            if data is None:
+                handle = open(path, 'rb')
+                data = handle.read()
+                handle.close()
+            if data == b'':
+                print('!!!! file at', path, 'is empty!!')
+                return None, None
+            return id, data
     
-    mimetype_get_time, mt_str = get_mimetype_from_file()
-    read_time += mimetype_get_time
+        read_time, a = read_data()
+        id, data = a
+        if id is None: return
+
+        @time_it
+        def get_mimetype_from_file(data=data):
+            mimetype = magic.from_buffer(data, mime=True)
+            return mimetype
+
+        mimetype_get_time, mt_str = get_mimetype_from_file()
+        compute_time = mimetype_get_time
+    
+        @time_it
+        def hashit(data=data):
+            return sha256_hash(data)
+    
+        hash_time, sha256 = hashit()
+        compute_time += hash_time
+        if os.path.exists(get_path(sha256)):
+            raise FileExistsError()
     print(f'id={id}\tread={round(read_time, n)}', end='\t')
 
-    @time_it
-    def save_file(data=data, mimetype=mt_str):
-        return File.save_file(data, mimetype, warn_if_exists=False)
+
+    print(f'compute={round(compute_time, n)}', end='\t')
 
     @time_it
-    def db_ops(id=id, mt_str=mt_str, data=data):
+    def db_ops(id=id, mt_str=mt_str, sha256=sha256):
         post = Post.get(Post.board==BOARD, Post.local_id==id)
         mt_row = get_mimetype(mt_str)
-        save_file_time, sha256 = save_file()
-        Content.get_or_create(post=post, sha256_current=sha256, mimetype_id=mt_row.id, file_size_current=len(data))
-        return save_file_time
+        Content.get_or_create(post=post, sha256_current=sha256, mimetype_id=mt_row.id, file_size_current=os.path.getsize(path))
+        return None
 
-    db_ops_time, save_file_time = db_ops()
-    print(f'db_ops={round(db_ops_time-save_file_time, n)}', f'save={round(save_file_time, n)}', sep='\t', end='\t')
+    db_ops_time, _ = db_ops()
 
-    try:
-        os.unlink(path)
-    except FileNotFoundError:
-        pass
+
+    @time_it
+    def save():
+        ensure_dir(sha256)
+        #print(path, '->', IMAGE_DIR+get_path(sha256))
+        shutil.move(path, IMAGE_DIR+get_path(sha256))
+        return None
+
+    save_file_time, _ = save()
+
+    print(f'db_ops={round(db_ops_time, n)}', f'save={round(save_file_time, n)}', sep='\t', end='\t')
+
     ended_at = time.time()
 
     global jobs_executed
@@ -103,7 +128,7 @@ path = '/hugedata/booru/danbooru2019/danbooru2019/original'
 if __name__ == '__main__':
     while True:
         started_at = time.time()
-        if rc.dbsize():
+        if rc.dbsize() or False:
             path = rc.randomkey()
             path = str(path, 'utf8')
             print('Using cached', path)
