@@ -1,4 +1,5 @@
 from peewee import *
+import peewee
 import datetime
 from PIL import Image
 import hashlib
@@ -59,8 +60,13 @@ class File:
 
 import logging
 logger = logging.getLogger('peewee')
-#logger.addHandler(logging.StreamHandler())
+logger.addHandler(logging.StreamHandler())
 logger.setLevel(logging.DEBUG)
+
+class ForeignKeyField(peewee.ForeignKeyField):
+    @property
+    def field_type(self):
+        return self.rel_field.field_type.replace('BIGAUTO', 'BIGINT').replace('AUTO_INCREMENT', '').replace('AUTO', 'INTEGER')
 
 class MyModel(Model):
     class Meta:
@@ -71,11 +77,20 @@ def create_table(cls):
     return cls
 
 class TinyIntegerField(SmallIntegerField):
-    field_type = 'tinyint'
+    field_type = 'TINYINT UNSIGNED'
+
+class TinyIntegerAutoField(BigAutoField):
+    field_type = 'TINYINT UNSIGNED AUTO_INCREMENT'
+    auto_increment = True
+
+class SmallIntegerAutoField(BigAutoField):
+    field_type = 'SMALLINT UNSIGNED AUTO_INCREMENT'
+    auto_increment = True
+
 
 @create_table
 class Imageboard(MyModel):
-    id = TinyIntegerField(primary_key=True)
+    id = TinyIntegerAutoField(primary_key=True)
     name = CharField(unique=True)
     base_url = CharField(unique=True)
 
@@ -101,8 +116,9 @@ class UserJoinDate(MyModel):
 
 @create_table
 class AccessLevel(MyModel):
-    id = SmallIntegerField(primary_key=True)
+    id = SmallIntegerAutoField(primary_key=True)
     name = CharField(unique=True)
+
 
 @create_table
 class UserAccessLevel(MyModel):
@@ -116,7 +132,7 @@ class Tag(MyModel):
 
 @create_table
 class TagPostCount(MyModel):
-    tag = ForeignKeyField(Tag)
+    tag = ForeignKeyField(Tag, index=True)
     board = Board('tag_counts')
     post_count = IntegerField(index=True, default=0)
     changed_at = DateTimeField(index=True, default=datetime.datetime.now)
@@ -127,7 +143,7 @@ class TagPostCount(MyModel):
 
 @create_table
 class Type(MyModel):
-    id = SmallIntegerField(primary_key=True)
+    id = TinyIntegerAutoField(primary_key=True)
     name = CharField(unique=True)
     created_at = DateTimeField(index=True, default=datetime.datetime.now)
 
@@ -176,6 +192,7 @@ class ImageMetadata(MyModel):
     image_width = IntegerField(index=True)
     image_height = IntegerField(index=True)
     file_size = IntegerField(index=True, null=True)
+    md5 = CharField(index=True)
 
 @create_table
 class PreviewSizeInfo(MyModel):
@@ -195,7 +212,13 @@ class ImageURL(MyModel):
 
 @create_table
 class Status(MyModel):
-    id = TinyIntegerField(primary_key=True)
+    id = TinyIntegerAutoField(primary_key=True)
+    value = CharField(unique=True)
+
+@create_table
+class PostStatus(MyModel):
+    post = ForeignKeyField(Post, primary_key=True)
+    status = ForeignKeyField(Status)
 
 @create_table
 class DanbooruPostMetadata(MyModel):
@@ -216,7 +239,7 @@ class DanbooruPostMetadata(MyModel):
 
 @create_table
 class MimeType(MyModel):
-    id = SmallIntegerField(primary_key=True)
+    id = TinyIntegerAutoField(primary_key=True)
     name = CharField(unique=True)
 
 @create_table
@@ -235,6 +258,11 @@ class Comment(MyModel):
     local_id = IntegerField(index=True)
     body = TextField()
     creator = ForeignKeyField(User, backref='comments')
+
+    score = IntegerField(index=True, null=True)
+    comment_created_at = DateTimeField()
+    row_created_at = DateTimeField(default=datetime.datetime.now)
+    row_updated_at = DateTimeField(default=datetime.datetime.now)
     class Meta:
         indexes = (
                 (('post', 'local_id'), True), 
@@ -249,11 +277,12 @@ class PostTag(MyModel):
 
 @create_table
 class EntityType(MyModel):
+    id = SmallIntegerAutoField(primary_key=True)
     name = CharField(unique=True)
 
 @create_table
 class QueuedImportEntity(MyModel):
-    board = ForeignKeyField(Imageboard)
+    board = Board('queued_import_entities')
     entity_type = ForeignKeyField(EntityType)
     entity_local_id = IntegerField()
     additional_data = TextField(null=True)
@@ -309,7 +338,7 @@ class ImportEntityError(MyModel):
 
 @create_table
 class ImportedEntity(MyModel):
-    board = ForeignKeyField(Imageboard)
+    board = Board('imported_entities')
     entity_type = ForeignKeyField(EntityType)
     entity_local_id = IntegerField(index=True)
     additional_data = TextField(null=True)
@@ -328,4 +357,29 @@ class ImportedEntity(MyModel):
                 (('board', 'entity_type', 'entity_local_id'), True), 
                 )
 
+@create_table
+class Note(MyModel):
+    board = Board('notes')
+    local_id = IntegerField(index=True)
+    author = ForeignKeyField(User, backref='notes')
+    post = ForeignKeyField(Post, backref='notes')
+    body = TextField()
+    version = SmallIntegerField()
+    
+    note_created_at = DateTimeField()
+    note_updated_at = DateTimeField()
 
+    row_created_at = DateTimeField(default=datetime.datetime.now)
+
+    is_active = BooleanField()
+
+    x = IntegerField()
+    y = IntegerField()
+    width = IntegerField()
+    height = IntegerField()
+    
+    class Meta:
+        indexes = (
+                (('board', 'local_id', 'version'), True), 
+                (('board', 'local_id'), False), 
+                )
