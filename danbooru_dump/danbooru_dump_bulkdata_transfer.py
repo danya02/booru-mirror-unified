@@ -16,7 +16,7 @@ r = redis.Redis()
 rc = redis.Redis(db=2)
 #rhashes_mimes = redis.Redis(db=2)
 
-BOARD, _ = Imageboard.get_or_create(name='danbooru', base_url='https://danbooru.me')
+BOARD, _ = Imageboard.get_or_create(name='danbooru', base_url='https://danbooru.donmai.us')
 
 started_work_at = time.time()
 jobs_executed = 0
@@ -44,7 +44,7 @@ def time_it(fn):
 def data_import(path, thread=None, select_row_time=None):
     started_at = time.time()
     n=6
-
+    ext = path.split('.')[-1]
 
     read_start = time.time()
     id = int( path.split('/')[-1].split('.')[0] )
@@ -96,7 +96,7 @@ def data_import(path, thread=None, select_row_time=None):
     def db_ops(id=id, mt_str=mt_str, sha256=sha256):
         post = Post.get(Post.board==BOARD, Post.local_id==id)
         mt_row = get_mimetype(mt_str)
-        Content.get_or_create(post=post, sha256_current=sha256, mimetype_id=mt_row.id, file_size_current=os.path.getsize(path))
+        Content.get_or_create(post=post, sha256_current=sha256, mimetype_id=mt_row.id, file_size_current=os.path.getsize(path), ext=ext)
         return None
 
     db_ops_time, _ = db_ops()
@@ -106,7 +106,7 @@ def data_import(path, thread=None, select_row_time=None):
     def save():
         ensure_dir(sha256)
         #print(path, '->', IMAGE_DIR+get_path(sha256))
-        shutil.move(path, IMAGE_DIR+get_path(sha256))
+        shutil.move(path, IMAGE_DIR+get_path(sha256)+'.'+ext)
         return None
 
     save_file_time, _ = save()
@@ -124,7 +124,7 @@ def data_import(path, thread=None, select_row_time=None):
     print(f'time={round(time_on_job, n)}', f'avg={round(avg_time,n)}', f'jobs={jobs_executed}', sep='\t')
 
 
-path = '/hugedata/booru/danbooru2019/danbooru2019/original'
+path = '/hugedata/booru/danbooru2020/danbooru2020/original'
 if __name__ == '__main__':
     while True:
         started_at = time.time()

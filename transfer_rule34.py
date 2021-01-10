@@ -189,8 +189,9 @@ class Post(OldModel):
         try:
             database.PostTag.insert_many(data).execute()
         except:
-            for i in self.tags:
-                i.migrate(post_row=post)
+            with db.atomic():
+                for i in self.tags:
+                    i.migrate(post_row=post)
         PostTag.update(deleted=True).where(PostTag.post==self).where(PostTag.tag.in_(tags)).execute()
         if len(self.content):
             self.content.get().migrate(post)
@@ -210,12 +211,14 @@ class Content(OldModel):
         sha256 = hashlib.sha256(data).hexdigest()
         mt = magic.from_buffer(data, mime=True)
         mt_row, _ = database.MimeType.get_or_create(name=mt)
+        ext = self.path.split('.')[-1]
         row, _ = database.Content.get_or_create(post=post_row or self.post.migrate(),
                 sha256_current=sha256,
                 mimetype=mt_row,
                 file_size_current=len(data),
-                we_modified_it=False)
-        database.File.save_file(data, raise_if_exists=True, but_check_for_same=True)
+                we_modified_it=False,
+                ext=ext)
+        database.File.save_file(data, ext, raise_if_exists=True, but_check_for_same=True)
         self.deleted = True
         self.save()
         return row
@@ -285,7 +288,8 @@ page = 1
 iterated = True
 while iterated:
     iterated = False
-    for i in Post.select().where(Post.deleted == False).limit(1).iterator():
+    #for i in Post.select().where(Post.deleted == False).where(Post.status_id.in_([3, 16])).limit(1).iterator():
+    for i in Content.select().where(Content.deleted == False).limit(1).iterator():
         i.migrate()
         iterated = True
     page += 1

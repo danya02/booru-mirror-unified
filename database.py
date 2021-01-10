@@ -35,25 +35,45 @@ def get_dir(name):
 def get_path(name):
     return get_dir(name) + name
 
+def get_thumbnail_path(name):
+    return 'thumbnails/' + get_dir(name) + name
+
 def ensure_dir(name):
     target_dir = get_dir(name)
     os.makedirs(IMAGE_DIR + target_dir, exist_ok=True)
+    os.makedirs(IMAGE_DIR + 'thumbnails/' + target_dir, exist_ok=True)
 
 class File:
-    def save_file(data, raise_if_exists=True, but_check_for_same=False):
+    @staticmethod
+    def save_file(data, ext, raise_if_exists=True, but_check_for_same=False):
         name = sha256_hash(data)
         ensure_dir(name)
-        path = IMAGE_DIR + get_path(name)
-        if os.path.isfile(path) and raise_if_exists:
+        path_no_ext = IMAGE_DIR + get_path(name)
+        path = path_no_ext + '.' + ext
+
+        return_value = None
+        if (os.path.isfile(path) or os.path.isfile(path_no_ext)) and raise_if_exists:
             if not but_check_for_same:
-                raise FileExistsError('file with name', path, 'already exists')
+                raise FileExistsError('file with name', path, '(maybe omitting extension) already exists')
             else:
-                with open(path, 'rb') as handle:
-                    exist_data = handle.read()
-                if data == exist_data:
-                    return name
-                else:
-                    raise FileExistsError('file with name', path, 'already exists and is different from new data')
+                if os.path.isfile(path):
+                    with open(path, 'rb') as handle:
+                        exist_data = handle.read()
+                    if data == exist_data:
+                        return_value = name
+                    else:
+                        raise FileExistsError('file with name', path, 'already exists and is different from new data')
+                if os.path.isfile(path_no_ext):
+                    with open(path_no_ext, 'rb') as handle:
+                        exist_data = handle.read()
+                    if data == exist_data:
+                        print(path_no_ext, 'renamed to', path)
+                        os.rename(path_no_ext, path)
+                        return_value = name
+                    else:
+                        raise FileExistsError('file with name', path_no_ext, 'already exists and is different from new data')
+
+
         with open(path, 'wb') as handle:
             handle.write(data)
         return name
@@ -94,8 +114,8 @@ class Imageboard(MyModel):
     name = CharField(unique=True)
     base_url = CharField(unique=True)
 
-def Board(backref=None):
-    return ForeignKeyField(Imageboard, index=True, backref=backref)
+def Board(backref=None, null=None):
+    return ForeignKeyField(Imageboard, index=True, backref=backref, null=null)
 
 @create_table
 class User(MyModel):
@@ -133,7 +153,7 @@ class Tag(MyModel):
 @create_table
 class TagPostCount(MyModel):
     tag = ForeignKeyField(Tag, index=True)
-    board = Board('tag_counts')
+    board = Board('tag_counts', null=True)
     post_count = IntegerField(index=True, default=0)
     changed_at = DateTimeField(index=True, default=datetime.datetime.now)
     class Meta:
@@ -245,8 +265,9 @@ class MimeType(MyModel):
 @create_table
 class Content(MyModel):
     post = ForeignKeyField(Post, backref='content')
-    sha256_current = CharField(unique=True)
-    sha256_when_acquired = CharField(unique=True, null=True)
+    ext = CharField(index=True, null=True, max_length=16)
+    sha256_current = FixedCharField(unique=True, max_length=64)
+    sha256_when_acquired = FixedCharField(unique=True, null=True, max_length=64)
     mimetype = ForeignKeyField(MimeType, backref='contents')
     file_size_current = IntegerField(index=True)
     file_size_when_acquired = IntegerField(index=True, null=True)
