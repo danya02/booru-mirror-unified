@@ -12,7 +12,7 @@ IMAGE_DIR = '/hugedata/booru/'
 DIR_TREE_DEPTH = 2
 DIR_TREE_SEGMENT_LEN = 2
 #db = SqliteDatabase('test.db', timeout=600)
-db = MySQLDatabase('unifiedbooru', user='booru', password='booru', host='10.0.0.2')
+db = MySQLDatabase('unifiedbooru', user='booru', password='booru', host='10.0.0.128')
 
 class MediumBlobField(BlobField):
     field_type = 'MEDIUMBLOB'
@@ -91,6 +91,7 @@ class ForeignKeyField(peewee.ForeignKeyField):
 class MyModel(Model):
     class Meta:
         database = db
+        legacy_table_names = False
 
 def create_table(cls):
     db.create_tables([cls])
@@ -103,10 +104,19 @@ class TinyIntegerAutoField(BigAutoField):
     field_type = 'TINYINT UNSIGNED AUTO_INCREMENT'
     auto_increment = True
 
+class UnsignedSmallIntegerField(IntegerField):
+    field_type = 'SMALLINT UNSIGNED'
+
 class SmallIntegerAutoField(BigAutoField):
     field_type = 'SMALLINT UNSIGNED AUTO_INCREMENT'
     auto_increment = True
 
+class UnsignedIntegerField(IntegerField):
+    field_type = 'INTEGER UNSIGNED'
+
+class UnsignedAutoField(AutoField):
+    field_type = 'INTEGER UNSIGNED AUTO_INCREMENT'
+    auto_increment = True
 
 @create_table
 class Imageboard(MyModel):
@@ -119,8 +129,9 @@ def Board(backref=None, null=None):
 
 @create_table
 class User(MyModel):
+    id = UnsignedAutoField(primary_key=True)
     board = Board('users')
-    local_id = IntegerField(index=True, null=True)
+    local_id = UnsignedIntegerField(index=True, null=True)
     username = CharField(null=True)
     row_created_at = DateTimeField(index=True, default=datetime.datetime.now)
     row_updated_at = DateTimeField(index=True, default=datetime.datetime.now)
@@ -147,6 +158,7 @@ class UserAccessLevel(MyModel):
 
 @create_table
 class Tag(MyModel):
+    id = UnsignedAutoField(primary_key=True)
     name = CharField(unique=True)
     created_at = DateTimeField(index=True, default=datetime.datetime.now)
 
@@ -154,7 +166,7 @@ class Tag(MyModel):
 class TagPostCount(MyModel):
     tag = ForeignKeyField(Tag, index=True)
     board = Board('tag_counts', null=True)
-    post_count = IntegerField(index=True, default=0)
+    post_count = UnsignedIntegerField(index=True, default=0)
     changed_at = DateTimeField(index=True, default=datetime.datetime.now)
     class Meta:
         indexes = (
@@ -178,8 +190,9 @@ class TagType(MyModel):
 
 @create_table
 class Post(MyModel):
+    id = UnsignedAutoField(primary_key=True)
     board = Board('posts')
-    local_id = IntegerField(index=True)
+    local_id = UnsignedIntegerField(index=True)
     row_created_at = DateTimeField(default=datetime.datetime.now)
     row_updated_at = DateTimeField(index=True, default=datetime.datetime.now)
     post_created_at = DateTimeField(index=True)
@@ -188,7 +201,8 @@ class Post(MyModel):
     source = TextField(null=True)
     rating = CharField(max_length=1)
     score = IntegerField(index=True)
-    parent_id = IntegerField(null=True) # should be a foreign key to self, but this constraint may not be possible to satisfy while inserting
+    parent_local_id = UnsignedIntegerField(null=True)
+    parent = ForeignKeyField('self', null=True)
 
 
     class Meta:
@@ -209,19 +223,19 @@ class PostFavs(MyModel):
 @create_table
 class ImageMetadata(MyModel):
     post = ForeignKeyField(Post, primary_key=True)
-    image_width = IntegerField(index=True)
-    image_height = IntegerField(index=True)
+    image_width = UnsignedIntegerField(index=True)
+    image_height = UnsignedIntegerField(index=True)
     file_size = IntegerField(index=True, null=True)
-    md5 = CharField(index=True)
+    md5 = CharField(index=True, max_length=32)
 
 @create_table
 class PreviewSizeInfo(MyModel):
     post = ForeignKeyField(Post, primary_key=True)
-    sample_width = IntegerField()
-    sample_height = IntegerField()
+    sample_width = UnsignedIntegerField()
+    sample_height = UnsignedIntegerField()
 
-    preview_width = IntegerField()
-    preview_height = IntegerField()
+    preview_width = UnsignedSmallIntegerField()
+    preview_height = UnsignedSmallIntegerField()
 
 @create_table
 class ImageURL(MyModel):
@@ -261,9 +275,26 @@ class DanbooruPostMetadata(MyModel):
 class MimeType(MyModel):
     id = TinyIntegerAutoField(primary_key=True)
     name = CharField(unique=True)
+    ext = CharField(index=True, max_length=16)
 
 @create_table
 class Content(MyModel):
+    post = ForeignKeyField(Post, backref='content', primary_key=True)
+    sha256_current = FixedCharField(unique=True, max_length=64)
+    sha256_when_acquired = FixedCharField(unique=True, null=True, max_length=64)
+    mimetype = ForeignKeyField(MimeType, backref='contents')
+    file_size_current = IntegerField(index=True)
+    file_size_when_acquired = IntegerField(index=True, null=True)
+    we_modified_it = BooleanField(index=True, default=False)
+
+@create_table
+class ContentThumbnail(MyModel):
+    content = ForeignKeyField(Content, backref='thumbnail', primary_key=True)
+    generated_at = DateTimeField(default=datetime.datetime.now, index=True)
+    mimetype = ForeignKeyField(MimeType)
+
+
+class ContentOld(MyModel):
     post = ForeignKeyField(Post, backref='content')
     ext = CharField(index=True, null=True, max_length=16)
     sha256_current = FixedCharField(unique=True, max_length=64)
@@ -275,8 +306,9 @@ class Content(MyModel):
 
 @create_table
 class Comment(MyModel):
+    id = UnsignedAutoField(primary_key=True)
     post = ForeignKeyField(Post, backref='comments')
-    local_id = IntegerField(index=True)
+    local_id = UnsignedIntegerField(index=True)
     body = TextField()
     creator = ForeignKeyField(User, backref='comments')
 
@@ -303,12 +335,13 @@ class EntityType(MyModel):
 
 @create_table
 class QueuedImportEntity(MyModel):
+    id = UnsignedAutoField(primary_key=True)
     board = Board('queued_import_entities')
     entity_type = ForeignKeyField(EntityType)
-    entity_local_id = IntegerField()
+    entity_local_id = UnsignedIntegerField()
     additional_data = TextField(null=True)
     enqueued_at = DateTimeField(default=datetime.datetime.now, index=True)
-    errors_encountered = IntegerField(null=True, index=True)
+    errors_encountered = UnsignedIntegerField(null=True, index=True)
     priority = FloatField(default=random.random, index=True)
     row_locked = BooleanField(index=True)
 
@@ -353,15 +386,17 @@ class QueuedImportEntity(MyModel):
 
 @create_table
 class ImportEntityError(MyModel):
+    id = UnsignedAutoField(primary_key=True)
     queued_entity = ForeignKeyField(QueuedImportEntity, index=True, on_delete='CASCADE')
     when = DateTimeField(default=datetime.datetime.now)
     error = TextField()
 
 @create_table
 class ImportedEntity(MyModel):
+    id = UnsignedAutoField(primary_key=True)
     board = Board('imported_entities')
     entity_type = ForeignKeyField(EntityType)
-    entity_local_id = IntegerField(index=True)
+    entity_local_id = UnsignedIntegerField(index=True)
     additional_data = TextField(null=True)
     latest_update_at = DateTimeField(default=datetime.datetime.now, index=True)
     final = BooleanField()
@@ -380,8 +415,9 @@ class ImportedEntity(MyModel):
 
 @create_table
 class Note(MyModel):
+    id = UnsignedAutoField(primary_key=True)
     board = Board('notes')
-    local_id = IntegerField(index=True)
+    local_id = UnsignedIntegerField(index=True)
     author = ForeignKeyField(User, backref='notes')
     post = ForeignKeyField(Post, backref='notes')
     body = TextField()
@@ -394,10 +430,10 @@ class Note(MyModel):
 
     is_active = BooleanField()
 
-    x = IntegerField()
-    y = IntegerField()
-    width = IntegerField()
-    height = IntegerField()
+    x = UnsignedIntegerField()
+    y = UnsignedIntegerField()
+    width = UnsignedIntegerField()
+    height = UnsignedIntegerField()
     
     class Meta:
         indexes = (

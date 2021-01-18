@@ -8,10 +8,11 @@ import traceback
 import random
 import time
 import logging
+import redis
+
+r = redis.Redis(db=12)
 
 bdb = BooruDatabase('danbooru')
-
-os.chdir('/hugedata/booru/danbooru2019/danbooru2019/metadata/small')
 
 def parse_date(val):
     try:
@@ -25,29 +26,65 @@ def parse_date(val):
         return None
     return v
 
-def insert_row(struct, skip_if_exists=True):
+def insert_row(struct, skip_if_exists=False):
     print(struct['id'])
     post = Post()
     post_existing = bdb.post[ int(struct['id']) ]
     if skip_if_exists and (post_existing is not None):
         return None
+    if post_existing:
+        post = post_existing
 
+    print(post, post.__data__, flush=True)
+    post.local_id = struct['id']
+    print(post.post_created_at, parse_date(struct['created_at']))
+    print(post.post_updated_at, parse_date(struct['updated_at']))
+    #input()
     post.post_created_at = parse_date(struct['created_at'])
     post.post_updated_at = parse_date(struct['updated_at'])
+    post.row_updated_at = datetime.datetime.now()
     post.rating = struct['rating']
     post.source = struct['source'] or None
     post.score = struct['score']
-    post.parent_id = int(struct['parent_id']) or None
+    post.parent_local_id = int(struct['parent_id']) or None
     post.uploaded_by = User.get_or_create(board=bdb.booru, local_id=int(struct['uploader_id']))[0]
     bdb.post[ int(struct['id']) ] = post
+    post = bdb.post[ int(struct['id']) ]
+    print(post, post.__data__, flush=True)
 
-    bdb.tag[post] = [tag['name'] for tag in struct['tags']]
+    old_tags = sorted(bdb.tag[post])
+    new_tags = sorted([tag['name'] for tag in struct['tags']])
+    if old_tags != new_tags:
+        print('updating tag set', old_tags, new_tags)
+        bdb.tag[post] = new_tags
+    else:
+        print('skipped tag set')
 
-    for fav in struct['favs']:
-        fav_user = User.get_or_create(board=bdb.booru, local_id=int(fav))[0]
-        PostFavs.get_or_create(post=post, user=fav_user)
 
-    danpost = DanbooruPostMetadata(post=post)
+    postfavs_existing = set( [i[0] for i in PostFavs.select(User.local_id).join(User).where(PostFavs.post==post).tuples()] )
+    postfavs_new = set([int(i) for i in struct['favs']])
+    diff_set = postfavs_existing.symmetric_difference(postfavs_new)
+    if diff_set:
+        print('fav set difference so updating', postfavs_existing, '->', postfavs_new)
+
+        fav_users = dict()
+        for i in User.select().where(User.board == bdb.booru).where(User.local_id.in_([int(i) for i in struct['favs']])):
+            fav_users[i.local_id] = i
+
+        PostFavs.delete().where(PostFavs.post == post).execute()
+
+        postfavs_list = []
+        for fav in struct['favs']:
+            fav = int(fav)
+            if fav not in fav_users:
+                fav_users[fav] = User.get_or_create(board=bdb.booru, local_id=int(fav))[0]
+            postfavs_list.append(PostFavs(post=post, user=fav_users[fav]))
+
+        PostFavs.bulk_create(postfavs_list)
+
+
+    danpost = DanbooruPostMetadata.get_or_none(post=post) or DanbooruPostMetadata(post=post)
+    print(danpost.__data__)
     danpost.up_score = int(struct['up_score'])
     danpost.down_score = int(struct['up_score'])
     danpost.pixiv_id = int(struct['pixiv_id']) or None
@@ -64,10 +101,12 @@ def insert_row(struct, skip_if_exists=True):
     except IntegrityError:
         danpost.save()
 
-    imgpost = ImageMetadata(post=post)
+    imgpost = ImageMetadata.get_or_none(post=post) or ImageMetadata(post=post)
+    print(imgpost.__data__)
     imgpost.image_width = int(struct['image_width'])
     imgpost.image_height = int(struct['image_height'])
     imgpost.file_size = int(struct['file_size'])
+    imgpost.md5 = struct['md5']
     try:
         imgpost.save(force_insert=True)
     except IntegrityError:
@@ -102,21 +141,26 @@ class DanbooruDumpRow(MyModel):
     post_id = IntegerField()
     content = TextField()
 
+DANBOORU = Imageboard.get(name='danbooru')
+POST_ENTITY, _ = EntityType.get_or_create(name='post')
+
 when = time.time()
 #for row in DanbooruDumpRow.select().order_by(fn.Rand()):
-while 1:
+while r.dbsize():
 #    count = DanbooruDumpRow.select(fn.COUNT(DanbooruDumpRow.id)).scalar()
 #    if not count:
 #        print('All done!!!')
 #        break
 #    row = DanbooruDumpRow.select().where(DanbooruDumpRow.id >= random.randint(0, count)).get()
-    row = DanbooruDumpRow.select().get()
-    print('selecting row', row.id, 'post_id', row.post_id, 'took', time.time()-when, 'seconds and', counter.count, 'queries')
+    rid = r.randomkey()
+    row = r.get(rid)
+    print('selecting row', rid, 'took', time.time()-when, 'seconds and', counter.count, 'queries')
     when = time.time()
-    insert_row_atomic(json.loads(row.content))
+    insert_row_atomic(json.loads(row))
     print('inserting took', time.time()-when, 'seconds and', counter.count, 'queries')
     when = time.time()
-    row.delete_instance()
+    ImportedEntity.get_or_create(entity_type=POST_ENTITY, board=DANBOORU, entity_local_id=rid, final=False)
+    r.delete(rid)
     print('removing took', time.time()-when, 'seconds and', counter.count, 'queries')
     print()
     counter.reset()

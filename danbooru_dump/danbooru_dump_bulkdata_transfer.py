@@ -24,14 +24,20 @@ find_files = False
 
 executor = concurrent.futures.ThreadPoolExecutor()
 
+@functools.lru_cache(maxsize=8192)
+def get_post(id):
+    return Post.get_or_none(Post.local_id == id, Post.board == BOARD)
+
 #@create_table
 class FileToImportTMP(MyModel):
     path = CharField(unique=True)
     locked = BooleanField(default=False)
 
 @functools.lru_cache(maxsize=None)
-def get_mimetype(name):
-    mimetype_row, _ = MimeType.get_or_create(name=name)
+def get_mimetype(name, ext):
+    mimetype_row = MimeType.get_or_none(MimeType.name == name)
+    if mimetype_row is None:
+        mimetype_row = MimeType.create(name=name, ext=ext)
     return mimetype_row
 
 def time_it(fn):
@@ -48,6 +54,10 @@ def data_import(path, thread=None, select_row_time=None):
 
     read_start = time.time()
     id = int( path.split('/')[-1].split('.')[0] )
+    post = get_post(id)
+    if post is None:
+        raise Post.DoesNotExist
+
     res = rc.get(path)
     if res is not None:
         res = str(res, 'utf-8')
@@ -94,19 +104,18 @@ def data_import(path, thread=None, select_row_time=None):
 
     @time_it
     def db_ops(id=id, mt_str=mt_str, sha256=sha256):
-        post = Post.get(Post.board==BOARD, Post.local_id==id)
-        mt_row = get_mimetype(mt_str)
-        Content.get_or_create(post=post, sha256_current=sha256, mimetype_id=mt_row.id, file_size_current=os.path.getsize(path), ext=ext)
-        return None
+        mt_row = get_mimetype(mt_str, ext)
+        Content.get_or_create(post=post, sha256_current=sha256, mimetype_id=mt_row.id, file_size_current=os.path.getsize(path))
+        return mt_row
 
-    db_ops_time, _ = db_ops()
+    db_ops_time, mt_row = db_ops()
 
 
     @time_it
-    def save():
+    def save(mt_row=mt_row):
         ensure_dir(sha256)
         #print(path, '->', IMAGE_DIR+get_path(sha256))
-        shutil.move(path, IMAGE_DIR+get_path(sha256)+'.'+ext)
+        shutil.move(path, IMAGE_DIR+get_path(sha256)+'.'+mt_row.ext)
         return None
 
     save_file_time, _ = save()
@@ -125,25 +134,29 @@ def data_import(path, thread=None, select_row_time=None):
 
 
 path = '/hugedata/booru/danbooru2020/danbooru2020/original'
+
+count = 0
 if __name__ == '__main__':
     while True:
+        count += 1
+        if count > 10000:
+            get_path.cache_clear()
+            count = 0
         started_at = time.time()
-        if rc.dbsize() or False:
-            path = rc.randomkey()
-            path = str(path, 'utf8')
-            print('Using cached', path)
-        else:
-            path, locked = '', 1
-            while locked:
-                path = r.randomkey()
-                l = r.get(path)
-                locked = l==b'1'
-                path = str(path, 'utf8')
-        r.set(path, '1')
+        path = r.randomkey()
+        if path is None:
+            print('out of jobs! waiting...')
+            time.sleep(1)
+            continue
+        path = str(path, 'utf8')
         try:
             data_import(path, select_row_time=time.time()-started_at)
             r.delete(path)
-            rc.delete(path)
+        except FileNotFoundError:
+            traceback.print_exc()
+            r.delete(path)
+        except Post.DoesNotExist:
+            r.delete(path)
         except:
             traceback.print_exc()
             continue

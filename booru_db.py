@@ -83,9 +83,18 @@ class TagDatabase:
 
                 PostTag.delete().where(PostTag.post == item).execute()
 
+                post_tags = []
                 for tagname in value:
-                    PostTag.get_or_create(post=item, tag=TagDatabase.get_tag(tagname))
-                    TagPostCount.get_or_create(board=item.board, tag=TagDatabase.get_tag(tagname))
+                    post_tags.append(PostTag(post=item, tag=TagDatabase.get_tag(tagname)))
+                #    TagPostCount.get_or_create(board=item.board, tag=TagDatabase.get_tag(tagname))
+                try:
+                    PostTag.bulk_create(post_tags)
+                except IntegrityError:
+                    for i in post_tags:
+                        try:
+                            i.save(force_insert=True)
+                        except IntegrityError:
+                            pass
 
                 #TagPostCount.update(post_count = TagPostCount.post_count + 1, changed_at=fn.Now()).where(TagPostCount.board == item.board).where(TagPostCount.tag.in_(subquery_tag_ids)).execute()
         else:

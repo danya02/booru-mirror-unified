@@ -216,8 +216,7 @@ class Content(OldModel):
                 sha256_current=sha256,
                 mimetype=mt_row,
                 file_size_current=len(data),
-                we_modified_it=False,
-                ext=ext)
+                we_modified_it=False)
         database.File.save_file(data, ext, raise_if_exists=True, but_check_for_same=True)
         self.deleted = True
         self.save()
@@ -231,8 +230,8 @@ class PostTag(OldModel):
 
     def migrate(self, post_row=None):
         database.PostTag.get_or_create(post=post_row or self.post.migrate(), tag=self.tag.migrate())
-        if confirm_delete(self):
-            PostTag.update(deleted=True).where(PostTag.tag==self.tag).where(PostTag.post==self.post).execute()
+#        if confirm_delete(self):
+#            PostTag.update(deleted=True).where(PostTag.tag==self.tag).where(PostTag.post==self.post).execute()
 
 class Comment(OldModel):
     author = ForeignKeyField(User, backref='comments')
