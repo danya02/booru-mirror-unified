@@ -292,7 +292,7 @@ class ContentThumbnail(MyModel):
     content = ForeignKeyField(Content, backref='thumbnail', primary_key=True)
     generated_at = DateTimeField(default=datetime.datetime.now, index=True)
     mimetype = ForeignKeyField(MimeType)
-
+    size = IntegerField(index=True)
 
 class ContentOld(MyModel):
     post = ForeignKeyField(Post, backref='content')
