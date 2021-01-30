@@ -168,6 +168,21 @@ class TagPostCount(MyModel):
     board = Board('tag_counts', null=True)
     post_count = UnsignedIntegerField(index=True, default=0)
     changed_at = DateTimeField(index=True, default=datetime.datetime.now)
+    
+    @classmethod
+    def set(cls, tag=None, board=None, post_count=None):
+        if tag is None or post_count is None: raise TypeError('tag and post_count cannot be None')
+        with db.atomic() as tx:
+            board_expr = cls.board == board
+            if board is None: board_expr = cls.board.is_null(True)
+            changed = cls.update(post_count = post_count, changed_at=datetime.datetime.now()).where(board_expr).where(cls.tag == tag).execute()
+            #print(tag, board, post_count, changed)
+            if changed > 1: 
+                tx.rollback()
+                raise ValueError('Too many rows changed by query -- wtf?? tag is ', tag, ' board is ', board, ' post_count is ', post_count)
+            elif changed == 1: return
+            else:
+                cls.create(board=board, tag=tag, post_count=post_count, changed_at=datetime.datetime.now())
     class Meta:
         indexes = (
                 (('board', 'tag'), True),

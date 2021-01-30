@@ -2,6 +2,7 @@ from database import *
 import subprocess
 import os
 import datetime
+import random
 
 mimetype_jpg = MimeType.get(MimeType.ext == 'jpg')
 mimetype_png = MimeType.get(MimeType.ext == 'png')
@@ -46,8 +47,12 @@ page = 0
 iterated = True
 while iterated:
     print('============= PAGE', page, '===============')
-    iterated = False
-    for c in Content.select().where(~fn.EXISTS(ContentThumbnail.select().where(ContentThumbnail.content_id==Content.post_id))).join(Post).order_by(Post.local_id).iterator():
-        create_thumbnail(c, skip_existing=False)
-        iterated = True
+    #iterated = False
+    try:
+        for c in Content.select().where(~fn.EXISTS(ContentThumbnail.select().where(ContentThumbnail.content_id==Content.post_id))).join(Post).order_by(Post.local_id).iterator():
+            try:
+                with db.atomic(): create_thumbnail(c, skip_existing=False)
+            except: continue
+            iterated = True
+    except IntegrityError: continue
     page += 1
