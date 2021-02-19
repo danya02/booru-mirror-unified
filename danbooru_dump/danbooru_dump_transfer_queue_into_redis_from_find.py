@@ -8,6 +8,7 @@ import time
 r = redis.Redis()
 
 def find_transfer():
+    os.system('find /hugedata/booru/danbooru_temp -type f -empty -print -delete')
     f = os.popen('find /hugedata/booru/danbooru_temp -type f')
     for row in f:
         row = row.strip()

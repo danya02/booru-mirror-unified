@@ -24,7 +24,7 @@ find_files = False
 
 executor = concurrent.futures.ThreadPoolExecutor()
 
-@functools.lru_cache(maxsize=8192)
+#@functools.lru_cache(maxsize=8192)
 def get_post(id):
     return Post.get_or_none(Post.local_id == id, Post.board == BOARD)
 
@@ -105,11 +105,17 @@ def data_import(path, thread=None, select_row_time=None):
     @time_it
     def db_ops(id=id, mt_str=mt_str, sha256=sha256):
         mt_row = get_mimetype(mt_str, ext)
-        Content.get_or_create(post=post, sha256_current=sha256, mimetype_id=mt_row.id, file_size_current=os.path.getsize(path))
+        try:
+            c = Content.get(post=post)
+            c.sha256_current=sha256
+            c.mimetype_id=mt_row.id
+            c.file_size_current=os.path.getsize(path)
+            c.save()
+        except Content.DoesNotExist:
+            c = Content.create(post=post, sha256_current=sha256, mimetype_id=mt_row.id, file_size_current=os.path.getsize(path))
         return mt_row
 
     db_ops_time, mt_row = db_ops()
-
 
     @time_it
     def save(mt_row=mt_row):
@@ -140,7 +146,7 @@ if __name__ == '__main__':
     while True:
         count += 1
         if count > 10000:
-            get_path.cache_clear()
+            #get_path.cache_clear()
             count = 0
         started_at = time.time()
         path = r.randomkey()

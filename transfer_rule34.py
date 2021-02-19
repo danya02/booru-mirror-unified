@@ -5,6 +5,7 @@ import functools
 import magic
 import hashlib
 import os
+import shutil
 
 BOARD, _ = database.Imageboard.get_or_create(name='rule34', base_url='https://rule34.xxx')
 
@@ -20,41 +21,25 @@ def confirm_delete(row):
     print('OK to delete', repr(row), str(row), row.__dict__)
     return True or input('y/n> ').lower() == 'y'
 
-IMAGE_DIR = '/hugedata/booru_old/rule34.xxx/'
+IMAGE_DIR = '/hugedata/booru_old/rule34.xxx-files/'
 
 #db = SqliteDatabase(SITE+'.db', timeout=600)
 db = MySQLDatabase('rule34', user='booru', password='booru', host='10.0.0.2')
 
-content_databases = dict()
-
-def get_content_db(name):
-    database = content_databases.get(name[:2])
-    if database is None:
-        try:
-            os.makedirs(IMAGE_DIR+name[:1]+'/')
-        except FileExistsError:
-            pass
-        database = SqliteDatabase(IMAGE_DIR+name[:1]+'/'+name[:2]+'.db', timeout=300)
-        content_databases[name[:2]] = database
-    return database
-
-class File(Model):
-    name = CharField(unique=True, primary_key=True)
-    content = BlobField()
-
+class File:
     @staticmethod
     def get_file_content(name):
-        database = get_content_db(name)
-        with database.bind_ctx((File,)):
-            database.create_tables((File,))
-            return File.get(File.name==name).content
+        with open(IMAGE_DIR + name[:2] + '/' + name, 'rb') as handle:
+            return handle.read()
 
     @staticmethod
     def delete_file(name):
-        database = get_content_db(name)
-        with database.bind_ctx((File,)):
-            database.create_tables((File,))
-            #return File.delete().where(File.name==name).execute()
+        os.makedirs(IMAGE_DIR + 'deleted/' + name[:2] + '/', exist_ok=True)
+        try:
+            shutil.move(IMAGE_DIR + name[:2] + '/' + name, IMAGE_DIR + 'deleted/' + name[:2] + '/' + name)
+        except FileNotFoundError as e:
+            if not os.path.isfile(IMAGE_DIR + 'deleted/' + name[:2] + '/' + name):
+                raise e
 
 class AccessLevel(OldModel):
     name = CharField(unique=True)
@@ -220,6 +205,7 @@ class Content(OldModel):
         database.File.save_file(data, ext, raise_if_exists=True, but_check_for_same=True)
         self.deleted = True
         self.save()
+        File.delete_file(self.path)
         return row
 
 class PostTag(OldModel):

@@ -9,6 +9,7 @@ import random
 import time
 import logging
 import redis
+import collections
 
 r = redis.Redis(db=12)
 
@@ -35,10 +36,10 @@ def insert_row(struct, skip_if_exists=False):
     if post_existing:
         post = post_existing
 
-    print(post, post.__data__, flush=True)
+    #print(post, post.__data__, flush=True)
     post.local_id = struct['id']
-    print(post.post_created_at, parse_date(struct['created_at']))
-    print(post.post_updated_at, parse_date(struct['updated_at']))
+    #print(post.post_created_at, parse_date(struct['created_at']))
+    #print(post.post_updated_at, parse_date(struct['updated_at']))
     #input()
     post.post_created_at = parse_date(struct['created_at'])
     post.post_updated_at = parse_date(struct['updated_at'])
@@ -50,22 +51,23 @@ def insert_row(struct, skip_if_exists=False):
     post.uploaded_by = User.get_or_create(board=bdb.booru, local_id=int(struct['uploader_id']))[0]
     bdb.post[ int(struct['id']) ] = post
     post = bdb.post[ int(struct['id']) ]
-    print(post, post.__data__, flush=True)
+    #print(post, post.__data__, flush=True)
 
     old_tags = sorted(bdb.tag[post])
     new_tags = sorted([tag['name'] for tag in struct['tags']])
     if old_tags != new_tags:
-        print('updating tag set', old_tags, new_tags)
+        #print('updating tag set', old_tags, new_tags)
         bdb.tag[post] = new_tags
     else:
-        print('skipped tag set')
+        pass
+        #print('skipped tag set')
 
 
     postfavs_existing = set( [i[0] for i in PostFavs.select(User.local_id).join(User).where(PostFavs.post==post).tuples()] )
     postfavs_new = set([int(i) for i in struct['favs']])
     diff_set = postfavs_existing.symmetric_difference(postfavs_new)
     if diff_set:
-        print('fav set difference so updating', postfavs_existing, '->', postfavs_new)
+        #print('fav set difference so updating', postfavs_existing, '->', postfavs_new)
 
         fav_users = dict()
         for i in User.select().where(User.board == bdb.booru).where(User.local_id.in_([int(i) for i in struct['favs']])):
@@ -84,7 +86,7 @@ def insert_row(struct, skip_if_exists=False):
 
 
     danpost = DanbooruPostMetadata.get_or_none(post=post) or DanbooruPostMetadata(post=post)
-    print(danpost.__data__)
+    #print(danpost.__data__)
     danpost.up_score = int(struct['up_score'])
     danpost.down_score = int(struct['up_score'])
     danpost.pixiv_id = int(struct['pixiv_id']) or None
@@ -102,7 +104,7 @@ def insert_row(struct, skip_if_exists=False):
         danpost.save()
 
     imgpost = ImageMetadata.get_or_none(post=post) or ImageMetadata(post=post)
-    print(imgpost.__data__)
+    #print(imgpost.__data__)
     imgpost.image_width = int(struct['image_width'])
     imgpost.image_height = int(struct['image_height'])
     imgpost.file_size = int(struct['file_size'])
@@ -146,22 +148,42 @@ POST_ENTITY, _ = EntityType.get_or_create(name='post')
 
 when = time.time()
 #for row in DanbooruDumpRow.select().order_by(fn.Rand()):
-while r.dbsize():
-#    count = DanbooruDumpRow.select(fn.COUNT(DanbooruDumpRow.id)).scalar()
-#    if not count:
-#        print('All done!!!')
-#        break
-#    row = DanbooruDumpRow.select().where(DanbooruDumpRow.id >= random.randint(0, count)).get()
-    rid = r.randomkey()
-    row = r.get(rid)
-    print('selecting row', rid, 'took', time.time()-when, 'seconds and', counter.count, 'queries')
-    when = time.time()
-    insert_row_atomic(json.loads(row))
-    print('inserting took', time.time()-when, 'seconds and', counter.count, 'queries')
-    when = time.time()
-    ImportedEntity.get_or_create(entity_type=POST_ENTITY, board=DANBOORU, entity_local_id=rid, final=False)
-    r.delete(rid)
-    print('removing took', time.time()-when, 'seconds and', counter.count, 'queries')
-    print()
-    counter.reset()
-    when = time.time()
+
+def infinite_counter():
+    i = 0
+    while 1:
+        i += 1
+        yield i
+
+start = time.time()
+
+try:
+    start_times = collections.deque(maxlen=50)
+    to_delete = collections.deque()
+    for ind in db.batch_commit(infinite_counter(), 100):
+    #    count = DanbooruDumpRow.select(fn.COUNT(DanbooruDumpRow.id)).scalar()
+    #    if not count:
+    #        print('All done!!!')
+    #        break
+    #    row = DanbooruDumpRow.select().where(DanbooruDumpRow.id >= random.randint(0, count)).get()
+        start_times.append(time.time())
+        rid = r.randomkey()
+        row = r.get(rid)
+    #    print('selecting row', rid, 'took', time.time()-when, 'seconds and', counter.count, 'queries')
+        when = time.time()
+        insert_row_atomic(json.loads(row))
+        print('inserting took', time.time()-when, 'seconds and', counter.count, 'queries')
+        when = time.time()
+        ImportedEntity.get_or_create(entity_type=POST_ENTITY, board=DANBOORU, entity_local_id=rid, final=False)
+        to_delete.append(rid)
+        while len(to_delete) > 500:
+            v = to_delete.popleft()
+            print('deleting from redis', v)
+            r.delete(v)
+    #    print('removing took', time.time()-when, 'seconds and', counter.count, 'queries')
+        counter.reset()
+        when = time.time()
+        print('Current rate:', len(start_times) / (when - start_times[0]))
+        print()
+except KeyboardInterrupt:
+    input('Stopped, enter to continue or another ^C to quit')
